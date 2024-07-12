@@ -99,5 +99,5 @@ write_csv2(dat_presentation_with_material, "user_2024_files_url.csv")
 walk2(
   dat_presentation_with_material$attachment_url,
   dat_presentation_with_material$file_name,
-  \(x, y) download.file(x, here::here("attached_files", y))
+  \(x, y) download.file(x, here::here("attached_files", y), mode = "wb")
 )
