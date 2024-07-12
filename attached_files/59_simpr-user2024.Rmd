@@ -1,0 +1,213 @@
+---
+title: "lme example"
+author: "Ethan Brown"
+date: "2024-07-03"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Simulations in Base R
+
+```{r base_r_sim}
+## Set up parameters
+ns = c(100, 150, 200)
+mean_diffs = c(10, 20, 30)
+sds = c(50, 100)
+reps = 10
+
+## Bring together into data frame
+results_template = expand.grid(n = ns, 
+                               mean_diff = mean_diffs,
+                               sd = sds, p.value = NA_real_)
+
+base_r_sim = results_template[rep(1:nrow(results_template), each = reps),]
+
+## Loop over rows of the data frame and calculate the p-value
+for(i in 1:nrow(results_template)) {
+  params = base_r_sim[i,]
+  pre = rnorm(params$n, 0, params$sd)
+  post = pre + rnorm(params$n, params$mean_diff, params$sd)
+  
+  base_r_sim$p.value[i] = t.test(pre, post)$p.value
+}
+
+```
+
+```{r base_r_sim_print, echo = FALSE}
+base_r_sim
+```
+
+
+
+
+## Non-Varying Example
+
+```{r sim_non_vary}
+library(simpr)
+library(tidyverse)
+
+## Specify pre and post scores that differ by a given amount
+specify(pre = ~ rnorm(n, 0, sd),
+                       post = ~ pre + rnorm(n, mean_diff, sd)) %>% 
+  ## Define parameters that can be varied
+  define(n = 100,
+         mean_diff = 10,
+         sd = 50) %>% 
+  ## Generate datasets
+  generate(100) %>% 
+  ## Fit datasets
+  fit(t = ~t.test(post, pre, paired = TRUE)) %>% 
+  ## Collect results
+  tidy_fits() 
+```
+
+## Varying Example 
+
+Code displayed in PowerPoint slide (a bit slow)
+```{r simpr_vary_slow}
+library(simpr)
+library(tidyverse)
+library(future)
+
+## Specify pre and post scores that differ by a given amount
+sim_vary = specify(pre = ~ rnorm(n, 0, sd),
+                   post = ~ pre + rnorm(n, mean_diff, sd)) %>% 
+  ## Define parameters and vary them
+  define(n = c(100, 150, 200),
+         mean_diff = c(10, 20, 30),
+         sd = c(50, 100)) %>% 
+  ## Generate datasets
+  generate(1000, .progress = TRUE) %>%  
+  ## Fit datasets
+  fit(t = ~t.test(post, pre, paired = TRUE)) %>% 
+  ## Collect results
+  tidy_fits() 
+
+```
+
+Parallel version of code (much faster, requires `future` package)
+
+```{r sim_vary, eval = FALSE}
+library(simpr)
+library(tidyverse)
+library(future)
+
+plan(multisession, workers = 6) # or however many cores are reasonable to use
+
+## Specify pre and post scores that differ by a given amount
+sim_vary = specify(pre = ~ rnorm(n, 0, sd),
+                   post = ~ pre + rnorm(n, mean_diff, sd)) %>% 
+  ## Define parameters and vary them
+  define(n = c(100, 150, 200),
+         mean_diff = c(10, 20, 30),
+         sd = c(50, 100)) %>% 
+  ## Fit datasets
+  fit(t = ~t.test(post, pre, paired = TRUE)) %>% 
+  ## Collect results
+  tidy_fits() %>% 
+  ## Generate datasets (and perform post-processing)
+  generate(1000, .progress = TRUE) 
+
+```
+
+Show results
+
+
+
+
+
+## Simulating range restriction using `per_sim`
+
+T-test with range restriction (PowerPoint version, slow)
+
+```{r range_sim_slow, eval = FALSE, echo = FALSE}
+range_sim = sim_vary = specify(pre = ~ rnorm(n, 0, sd),
+                               post = ~ pre + rnorm(n, mean_diff, sd)) %>% 
+  ## Define parameters and vary them
+  define(n = c(100, 150, 200),
+         mean_diff = c(10, 20, 30),
+         sd = c(50, 100)) %>%
+  ## Generate datasets
+  generate(1000, .progress = TRUE) %>% 
+  ## Apply tidyverse functions to every simulation dataset
+  per_sim() %>% 
+  ## Mutate to add a range restriction  
+  mutate(across(everything(), case_when(
+    pre > 100 ~ 100,
+    pre < -100 ~ -100,
+    .default ~ pre))) %>% 
+  ## Fit datasets
+  fit(t = ~t.test(post, pre, paired = TRUE)) %>% 
+  ## Collect results
+  tidy_fits()
+
+```
+
+Parallel version
+
+```{r range_sim, eval = FALSE, echo = FALSE}
+range_sim = specify(pre = ~ rnorm(n, 0, sd),
+                    post = ~ pre + rnorm(n, mean_diff, sd)) %>% 
+  ## Define parameters and vary them
+  define(n = c(100, 150, 200),
+         mean_diff = c(10, 20, 30),
+         sd = c(50, 100)) %>%
+  ## Apply tidyverse functions to every simulation dataset
+  per_sim() %>% 
+  ## Mutate to add a range restriction  
+  mutate(pre = case_when(
+    pre > 100 ~ 100,
+    pre < -100 ~ -100,
+    TRUE ~ pre)) %>% 
+  ## Fit datasets
+  fit(t = ~t.test(post, pre, paired = TRUE)) %>% 
+  ## Collect results
+  tidy_fits() %>% 
+  ## Generate datasets
+  generate(1000, .progress = TRUE) 
+
+```
+```{r save, eval = FALSE, echo = FALSE}
+save(list = c("sim_vary", "range_sim"), file = "simpr_useR_2024.Rdata")
+```
+
+
+## Display more time-consuming output
+
+```{r load, eval = FALSE, echo = FALSE}
+load("simpr_useR_2024.Rdata")
+```
+
+
+Since some of the above is quite slow, we here simply load the resulting datasets and display them for reference.
+
+### `sim_vary`
+```{r sim_vary_print, echo = FALSE}
+
+sim_vary
+```
+
+
+Calculate power
+
+```{r sim_vary_power}
+sim_vary %>% 
+  group_by(n, mean_diff, sd) %>% 
+  summarize(Power = mean(p.value > 0.05))
+```
+
+
+### `range_sim`
+
+```{r range_sim_print}
+range_sim
+```
+
+### Power curves comparison
+
+
